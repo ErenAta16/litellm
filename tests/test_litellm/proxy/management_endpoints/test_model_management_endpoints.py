@@ -456,8 +456,9 @@ class TestClearCache:
             },
         ]
         mock_router.delete_deployment = MagicMock(return_value=True)
-        mock_router.auto_routers = MagicMock()
-        mock_router.auto_routers.clear = MagicMock()
+        # Real dicts (not MagicMock) so we can assert on their actual contents below.
+        mock_router.auto_routers = {"gpt-4": MagicMock(), "gpt-3.5-turbo": MagicMock()}
+        mock_router.complexity_routers = {"claude-3": MagicMock(), "gpt-3.5-turbo": MagicMock()}
 
         mock_config = MagicMock()
         mock_config.add_deployment = AsyncMock(return_value=True)
@@ -479,13 +480,75 @@ class TestClearCache:
             mock_router.delete_deployment.assert_any_call(id="db-model-1")
             mock_router.delete_deployment.assert_any_call(id="db-model-2")
 
-            # Should have cleared auto routers
-            mock_router.auto_routers.clear.assert_called_once()
+            # DB-backed router entries (gpt-4, claude-3) are cleared so they can be
+            # re-populated by the reload below; the config-backed entry (gpt-3.5-turbo)
+            # must survive, since add_deployment() only reloads DB models and would
+            # otherwise leave it permanently unroutable (see TestClearCachePreservesConfigRouters).
+            assert "gpt-4" not in mock_router.auto_routers
+            assert "claude-3" not in mock_router.complexity_routers
+            assert "gpt-3.5-turbo" in mock_router.auto_routers
+            assert "gpt-3.5-turbo" in mock_router.complexity_routers
 
             # Should have called add_deployment to reload DB models
             mock_config.add_deployment.assert_called_once_with(
                 prisma_client=mock_prisma, proxy_logging_obj=mock_logging
             )
+
+
+class TestClearCachePreservesConfigRouters:
+    """
+    Regression test: clear_cache() must not wipe config-defined auto/complexity
+    routers.
+
+    clear_cache() runs after any DB model write (e.g. a team admin patching a
+    team-owned model via PATCH /model/{id}/update). Before this fix, it called
+    auto_routers.clear() / complexity_routers.clear() unconditionally, which also
+    dropped routers defined in config.yaml belonging to *other* tenants. Those
+    entries are never restored, because the reload below only re-adds DB models
+    (proxy_config.add_deployment), so a config-defined router would stay
+    permanently unroutable until a full proxy restart - a cross-tenant
+    denial-of-service triggerable by any team admin's unrelated model update.
+    """
+
+    @pytest.mark.asyncio
+    async def test_config_backed_routers_survive_unrelated_db_model_update(self):
+        from litellm.proxy.management_endpoints.model_management_endpoints import (
+            clear_cache,
+        )
+
+        mock_router = MagicMock()
+        mock_router.model_list = [
+            {
+                "model_name": "team-a-db-router",
+                "model_info": {"id": "db-model-1", "db_model": True},
+                "litellm_params": {"model": "auto_router/complexity_router"},
+            },
+        ]
+        mock_router.delete_deployment = MagicMock(return_value=True)
+        mock_router.auto_routers = {"config-semantic-router": MagicMock()}
+        mock_router.complexity_routers = {
+            "team-a-db-router": MagicMock(),
+            "config-defined-complexity-router": MagicMock(),
+        }
+
+        mock_config = MagicMock()
+        mock_config.add_deployment = AsyncMock(return_value=True)
+
+        with (
+            patch("litellm.proxy.proxy_server.llm_router", mock_router),
+            patch("litellm.proxy.proxy_server.proxy_config", mock_config),
+            patch("litellm.proxy.proxy_server.prisma_client", MagicMock()),
+            patch("litellm.proxy.proxy_server.proxy_logging_obj", MagicMock()),
+            patch("litellm.proxy.proxy_server.verbose_proxy_logger"),
+        ):
+            await clear_cache()
+
+        # The DB-backed router for the model that was actually updated is cleared
+        # so the reload below can re-populate it.
+        assert "team-a-db-router" not in mock_router.complexity_routers
+        # Config-defined routers for unrelated tenants must survive untouched.
+        assert "config-defined-complexity-router" in mock_router.complexity_routers
+        assert "config-semantic-router" in mock_router.auto_routers
 
 
 class TestUpdateModel:

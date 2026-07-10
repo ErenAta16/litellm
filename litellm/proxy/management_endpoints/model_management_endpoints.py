@@ -1715,8 +1715,17 @@ async def clear_cache():
         for model_id in db_model_ids:
             llm_router.delete_deployment(id=model_id)
 
-        # Clear auto routers
-        llm_router.auto_routers.clear()
+        # Clear only DB-backed auto/complexity routers, keyed by model_name. A blanket
+        # .clear() would also drop config-defined routers, which are never re-added below
+        # (add_deployment only reloads DB models) - leaving them permanently unroutable
+        # until a full proxy restart, for every tenant, whenever any team admin updates
+        # any team-owned DB model.
+        db_model_names = {
+            model.get("model_name") for model in current_models if model.get("model_info", {}).get("db_model", False)
+        }
+        for model_name in db_model_names:
+            llm_router.auto_routers.pop(model_name, None)
+            llm_router.complexity_routers.pop(model_name, None)
 
         # Reload only DB models
         await proxy_config.add_deployment(prisma_client=prisma_client, proxy_logging_obj=proxy_logging_obj)
