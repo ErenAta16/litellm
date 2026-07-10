@@ -8,7 +8,7 @@ All values are configurable via proxy config.yaml.
 from enum import Enum
 from typing import Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ComplexityTier(str, Enum):
@@ -18,6 +18,25 @@ class ComplexityTier(str, Enum):
     MEDIUM = "MEDIUM"
     COMPLEX = "COMPLEX"
     REASONING = "REASONING"
+
+
+TIER_SEVERITY_ORDER: tuple[ComplexityTier, ...] = (
+    ComplexityTier.SIMPLE,
+    ComplexityTier.MEDIUM,
+    ComplexityTier.COMPLEX,
+    ComplexityTier.REASONING,
+)
+
+
+class KeywordTierRule(BaseModel):
+    """A deterministic override: if any keyword matches, route to this tier."""
+
+    keywords: List[str] = Field(
+        description="Keywords/phrases that trigger this rule (lexical or semantic match)",
+    )
+    tier: ComplexityTier = Field(
+        description="Tier to route to when this rule matches",
+    )
 
 
 # ─── Default Keyword Lists ───
@@ -257,7 +276,39 @@ class ComplexityRouterConfig(BaseModel):
         description="Default model to use if tier cannot be determined",
     )
 
+    # Deterministic keyword -> tier overrides, evaluated before weighted scoring
+    keyword_tier_rules: Optional[List[KeywordTierRule]] = Field(
+        default=None,
+        description="Rules that force a specific tier when their keywords match the prompt",
+    )
+
+    # Semantic (embedding) matching for keyword_tier_rules instead of literal text matching
+    semantic_keyword_matching: bool = Field(
+        default=False,
+        description="Match keyword_tier_rules by embedding similarity instead of literal text",
+    )
+    embedding_model: Optional[str] = Field(
+        default=None,
+        description="Embedding model (LiteLLM model name) used when semantic_keyword_matching is enabled",
+    )
+    match_threshold: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Minimum cosine similarity for a semantic keyword match",
+    )
+
     model_config = ConfigDict(extra="allow")  # Allow additional fields
+
+    @model_validator(mode="after")
+    def _validate_semantic_matching(self) -> "ComplexityRouterConfig":
+        if not self.semantic_keyword_matching:
+            return self
+        if not self.embedding_model:
+            raise ValueError("embedding_model is required when semantic_keyword_matching is enabled")
+        if not self.keyword_tier_rules:
+            raise ValueError("keyword_tier_rules must be non-empty when semantic_keyword_matching is enabled")
+        return self
 
 
 # Combined default config
