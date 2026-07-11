@@ -52,6 +52,19 @@ describe("ComplexityRouterConfig", () => {
     expect(screen.getByText(/Think step by step/)).toBeInTheDocument();
   });
 
+  it("should display the how classification works section", () => {
+    renderWithProviders(<ComplexityRouterConfig {...baseProps} />);
+    expect(screen.getByText("How Classification Works")).toBeInTheDocument();
+  });
+
+  it("should show score thresholds in the classification section", () => {
+    renderWithProviders(<ComplexityRouterConfig {...baseProps} />);
+    expect(screen.getByText(/Score < 0.15/)).toBeInTheDocument();
+    expect(screen.getByText(/Score 0.15 - 0.35/)).toBeInTheDocument();
+    expect(screen.getByText(/Score 0.35 - 0.60/)).toBeInTheDocument();
+    expect(screen.getByText(/Score > 0.60/)).toBeInTheDocument();
+  });
+
   it("should render the custom technical keywords field", () => {
     renderWithProviders(<ComplexityRouterConfig {...baseProps} />);
     expect(screen.getByText("Custom Technical Keywords")).toBeInTheDocument();

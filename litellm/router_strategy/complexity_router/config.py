@@ -32,6 +32,7 @@ class KeywordTierRule(BaseModel):
     """A deterministic override: if any keyword matches, route to this tier."""
 
     keywords: List[str] = Field(
+        min_length=1,
         description="Keywords/phrases that trigger this rule (lexical or semantic match)",
     )
     tier: ComplexityTier = Field(

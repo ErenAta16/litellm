@@ -26,10 +26,8 @@ export const handleAddAutoRouterSubmit = async (values: any, accessToken: string
         model_info: {},
       };
 
-      if (values.auto_router_embedding_model && values.auto_router_embedding_model !== "custom") {
+      if (values.auto_router_embedding_model) {
         autoRouterConfig.litellm_params.auto_router_embedding_model = values.auto_router_embedding_model;
-      } else if (values.custom_embedding_model) {
-        autoRouterConfig.litellm_params.auto_router_embedding_model = values.custom_embedding_model;
       }
     }
 

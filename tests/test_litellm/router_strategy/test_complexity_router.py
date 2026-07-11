@@ -1435,6 +1435,12 @@ class TestSemanticConfigValidation:
         assert config.semantic_keyword_matching is False
         assert config.match_threshold == 0.5
 
+    def test_rule_with_empty_keywords_raises(self):
+        with pytest.raises(ValidationError):
+            ComplexityRouterConfig(
+                keyword_tier_rules=[{"keywords": [], "tier": "REASONING"}],
+            )
+
 
 class _StubRouteLayer:
     """Returns a fixed acall result so _semantic_tier_override branches can be exercised."""

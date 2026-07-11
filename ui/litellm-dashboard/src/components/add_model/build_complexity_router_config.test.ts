@@ -78,6 +78,27 @@ describe("buildComplexityRouterConfig", () => {
     expect(config.custom_technical_keywords).toBeUndefined();
     expect(config.keyword_tier_rules).toBeUndefined();
   });
+
+  it("drops rule rows that have no keywords (backend rejects empty keyword lists)", () => {
+    const params: BuildComplexityRouterConfigParams = {
+      ...baseParams,
+      keywordTierRules: [
+        { id: "r1", keywords: [], tier: "COMPLEX" },
+        { id: "r2", keywords: ["k8s"], tier: "REASONING" },
+      ],
+    };
+    const config = buildComplexityRouterConfig(params);
+    expect(config.keyword_tier_rules).toEqual([{ keywords: ["k8s"], tier: "REASONING" }]);
+  });
+
+  it("omits keyword_tier_rules entirely when every rule row is empty", () => {
+    const params: BuildComplexityRouterConfigParams = {
+      ...baseParams,
+      keywordTierRules: [{ id: "r1", keywords: [], tier: "COMPLEX" }],
+    };
+    const config = buildComplexityRouterConfig(params);
+    expect(config.keyword_tier_rules).toBeUndefined();
+  });
 });
 
 describe("getSemanticConfigError", () => {
@@ -98,6 +119,16 @@ describe("getSemanticConfigError", () => {
   it("errors when enabled with an embedding model but no keyword tier rules", () => {
     expect(
       getSemanticConfigError({ semanticMatchingEnabled: true, embeddingModel: "voyage-3-5", keywordTierRules: [] }),
+    ).toMatch(/keyword tier rule/i);
+  });
+
+  it("errors when enabled and the only rule rows have no keywords", () => {
+    expect(
+      getSemanticConfigError({
+        semanticMatchingEnabled: true,
+        embeddingModel: "voyage-3-5",
+        keywordTierRules: [{ id: "r1", keywords: [], tier: "COMPLEX" }],
+      }),
     ).toMatch(/keyword tier rule/i);
   });
 
