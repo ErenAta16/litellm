@@ -1719,13 +1719,14 @@ async def clear_cache():
         # .clear() would also drop config-defined routers, which are never re-added below
         # (add_deployment only reloads DB models) - leaving them permanently unroutable
         # until a full proxy restart, for every tenant, whenever any team admin updates
-        # any team-owned DB model.
-        db_model_names = {
-            model.get("model_name") for model in current_models if model.get("model_info", {}).get("db_model", False)
-        }
-        for model_name in db_model_names:
-            llm_router.auto_routers.pop(model_name, None)
-            llm_router.complexity_routers.pop(model_name, None)
+        # any team-owned DB model. Anything that is not config-defined is DB-backed
+        # (currently registered or removed since last reload), so pop it and let
+        # add_deployment reregister it below if the DB still has it.
+        config_model_names = {model.get("model_name") for model in config_models}
+        for router_map in (llm_router.auto_routers, llm_router.complexity_routers):
+            for model_name in tuple(router_map.keys()):
+                if model_name not in config_model_names:
+                    router_map.pop(model_name, None)
 
         # Reload only DB models
         await proxy_config.add_deployment(prisma_client=prisma_client, proxy_logging_obj=proxy_logging_obj)

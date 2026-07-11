@@ -1453,6 +1453,66 @@ class TestLexicalKeywordTierRules:
         assert router._lexical_tier_override("what is a k8scluster thing") is None
 
 
+class TestKeywordTierRuleValidation:
+    """Regression: KeywordTierRule must reject empty/blank keyword lists.
+
+    An empty keywords list produces a `\\b\\b` regex in the lexical matcher that
+    fires on every prompt, and yields a route with zero utterances in the
+    semantic matcher which breaks the first embedding-backed request. Guard at
+    config parse time so bad rules never reach either matcher.
+    """
+
+    def test_empty_keywords_list_rejected(self):
+        from pydantic import ValidationError
+
+        from litellm.router_strategy.complexity_router.config import (
+            ComplexityTier,
+            KeywordTierRule,
+        )
+
+        with pytest.raises(ValidationError):
+            KeywordTierRule(keywords=[], tier=ComplexityTier.REASONING)
+
+    def test_blank_only_keywords_rejected(self):
+        from pydantic import ValidationError
+
+        from litellm.router_strategy.complexity_router.config import (
+            ComplexityTier,
+            KeywordTierRule,
+        )
+
+        with pytest.raises(ValidationError):
+            KeywordTierRule(keywords=["", "  "], tier=ComplexityTier.REASONING)
+
+    def test_blank_entries_are_stripped_and_dropped(self):
+        from litellm.router_strategy.complexity_router.config import (
+            ComplexityTier,
+            KeywordTierRule,
+        )
+
+        rule = KeywordTierRule(
+            keywords=[" k8s ", "", " ", "docker"], tier=ComplexityTier.REASONING
+        )
+        assert rule.keywords == ["k8s", "docker"]
+
+    def test_empty_rule_via_router_config_rejected(self, mock_router_instance, basic_config):
+        """Even wrapped inside ComplexityRouterConfig, an empty-keywords rule
+        must fail validation instead of silently building a matcher that
+        classifies every prompt as this rule's tier."""
+        from pydantic import ValidationError
+
+        config = {
+            **basic_config,
+            "keyword_tier_rules": [{"keywords": [], "tier": "REASONING"}],
+        }
+        with pytest.raises(ValidationError):
+            ComplexityRouter(
+                model_name="test-router",
+                litellm_router_instance=mock_router_instance,
+                complexity_router_config=config,
+            )
+
+
 def _make_embedding_response(vectors: List[List[float]]) -> "litellm.EmbeddingResponse":
     return litellm.EmbeddingResponse(
         model="fake-embed",

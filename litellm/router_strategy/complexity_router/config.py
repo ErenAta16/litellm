@@ -8,7 +8,7 @@ All values are configurable via proxy config.yaml.
 from enum import Enum
 from typing import Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ComplexityTier(str, Enum):
@@ -32,11 +32,22 @@ class KeywordTierRule(BaseModel):
     """A deterministic override: if any keyword matches, route to this tier."""
 
     keywords: List[str] = Field(
+        min_length=1,
         description="Keywords/phrases that trigger this rule (lexical or semantic match)",
     )
     tier: ComplexityTier = Field(
         description="Tier to route to when this rule matches",
     )
+
+    @field_validator("keywords")
+    @classmethod
+    def _require_non_blank_keywords(cls, keywords: List[str]) -> List[str]:
+        cleaned = [kw.strip() for kw in keywords if kw and kw.strip()]
+        if not cleaned:
+            raise ValueError(
+                "KeywordTierRule.keywords must contain at least one non-blank keyword"
+            )
+        return cleaned
 
 
 # ─── Default Keyword Lists ───

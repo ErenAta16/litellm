@@ -30,6 +30,16 @@ export interface ComplexityRouterConfigPayload {
   match_threshold?: number;
 }
 
+const sanitizeRuleKeywords = (keywords: string[]): string[] =>
+  keywords.map((kw) => kw.trim()).filter((kw) => kw.length > 0);
+
+const rulesWithKeywords = (
+  keywordTierRules: KeywordTierRule[],
+): { keywords: string[]; tier: KeywordTierRule["tier"] }[] =>
+  keywordTierRules
+    .map((rule) => ({ keywords: sanitizeRuleKeywords(rule.keywords), tier: rule.tier }))
+    .filter((rule) => rule.keywords.length > 0);
+
 export const getSemanticConfigError = ({
   semanticMatchingEnabled,
   embeddingModel,
@@ -39,7 +49,9 @@ export const getSemanticConfigError = ({
   | null => {
   if (!semanticMatchingEnabled) return null;
   if (!embeddingModel) return "Select an embedding model to use semantic keyword matching";
-  if (keywordTierRules.length === 0) return "Add at least one keyword tier rule to use semantic keyword matching";
+  if (rulesWithKeywords(keywordTierRules).length === 0) {
+    return "Add at least one keyword tier rule with keywords to use semantic keyword matching";
+  }
   return null;
 };
 
@@ -52,17 +64,18 @@ export const buildComplexityRouterConfig = ({
   semanticMatchingEnabled,
   embeddingModel,
   matchThreshold,
-}: BuildComplexityRouterConfigParams): ComplexityRouterConfigPayload => ({
-  tiers,
-  classifier_type: classifierType,
-  ...(classifierType === "llm" && classifierLlmConfig && { classifier_llm_config: classifierLlmConfig }),
-  ...(customTechnicalKeywords.length > 0 && { custom_technical_keywords: customTechnicalKeywords }),
-  ...(keywordTierRules.length > 0 && {
-    keyword_tier_rules: keywordTierRules.map((rule) => ({ keywords: rule.keywords, tier: rule.tier })),
-  }),
-  ...(semanticMatchingEnabled && {
-    semantic_keyword_matching: true,
-    embedding_model: embeddingModel,
-    match_threshold: matchThreshold,
-  }),
-});
+}: BuildComplexityRouterConfigParams): ComplexityRouterConfigPayload => {
+  const sanitizedRules = rulesWithKeywords(keywordTierRules);
+  return {
+    tiers,
+    classifier_type: classifierType,
+    ...(classifierType === "llm" && classifierLlmConfig && { classifier_llm_config: classifierLlmConfig }),
+    ...(customTechnicalKeywords.length > 0 && { custom_technical_keywords: customTechnicalKeywords }),
+    ...(sanitizedRules.length > 0 && { keyword_tier_rules: sanitizedRules }),
+    ...(semanticMatchingEnabled && {
+      semantic_keyword_matching: true,
+      embedding_model: embeddingModel,
+      match_threshold: matchThreshold,
+    }),
+  };
+};

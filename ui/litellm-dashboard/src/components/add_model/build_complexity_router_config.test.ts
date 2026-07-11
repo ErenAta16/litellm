@@ -99,6 +99,29 @@ describe("buildComplexityRouterConfig", () => {
     expect(config.custom_technical_keywords).toBeUndefined();
     expect(config.keyword_tier_rules).toBeUndefined();
   });
+
+  it("drops keyword tier rules whose keywords are empty or blank", () => {
+    const config = buildComplexityRouterConfig({
+      ...baseParams,
+      keywordTierRules: [
+        { id: "empty", keywords: [], tier: "COMPLEX" },
+        { id: "blank", keywords: ["", "  "], tier: "COMPLEX" },
+        { id: "keep", keywords: [" k8s ", "", "docker"], tier: "REASONING" },
+      ],
+    });
+    expect(config.keyword_tier_rules).toEqual([{ keywords: ["k8s", "docker"], tier: "REASONING" }]);
+  });
+
+  it("omits keyword_tier_rules entirely when every rule sanitizes to empty", () => {
+    const config = buildComplexityRouterConfig({
+      ...baseParams,
+      keywordTierRules: [
+        { id: "empty", keywords: [], tier: "COMPLEX" },
+        { id: "blank", keywords: ["  "], tier: "REASONING" },
+      ],
+    });
+    expect(config.keyword_tier_rules).toBeUndefined();
+  });
 });
 
 describe("getSemanticConfigError", () => {
@@ -120,6 +143,19 @@ describe("getSemanticConfigError", () => {
     expect(
       getSemanticConfigError({ semanticMatchingEnabled: true, embeddingModel: "voyage-3-5", keywordTierRules: [] }),
     ).toMatch(/keyword tier rule/i);
+  });
+
+  it("errors when enabled with rules that have no non-blank keywords", () => {
+    expect(
+      getSemanticConfigError({
+        semanticMatchingEnabled: true,
+        embeddingModel: "voyage-3-5",
+        keywordTierRules: [
+          { id: "r1", keywords: [], tier: "REASONING" },
+          { id: "r2", keywords: [" ", ""], tier: "REASONING" },
+        ],
+      }),
+    ).toMatch(/keyword/i);
   });
 
   it("returns null when enabled with both an embedding model and rules", () => {

@@ -523,6 +523,16 @@ class TestClearCachePreservesConfigRouters:
                 "model_info": {"id": "db-model-1", "db_model": True},
                 "litellm_params": {"model": "auto_router/complexity_router"},
             },
+            {
+                "model_name": "config-defined-complexity-router",
+                "model_info": {"id": "config-model-1", "db_model": False},
+                "litellm_params": {"model": "auto_router/complexity_router"},
+            },
+            {
+                "model_name": "config-semantic-router",
+                "model_info": {"id": "config-model-2", "db_model": False},
+                "litellm_params": {"model": "auto_router/semantic-router"},
+            },
         ]
         mock_router.delete_deployment = MagicMock(return_value=True)
         mock_router.auto_routers = {"config-semantic-router": MagicMock()}
@@ -549,6 +559,49 @@ class TestClearCachePreservesConfigRouters:
         # Config-defined routers for unrelated tenants must survive untouched.
         assert "config-defined-complexity-router" in mock_router.complexity_routers
         assert "config-semantic-router" in mock_router.auto_routers
+
+    @pytest.mark.asyncio
+    async def test_orphaned_db_router_entries_are_cleared(self):
+        """Regression: after a DB router is deleted (so it no longer appears in
+        model_list), a subsequent clear_cache must pop its stale entry from
+        auto_routers / complexity_routers, otherwise async_pre_routing_hook keeps
+        dispatching to the deleted router until the proxy restarts."""
+        from litellm.proxy.management_endpoints.model_management_endpoints import (
+            clear_cache,
+        )
+
+        mock_router = MagicMock()
+        mock_router.model_list = [
+            {
+                "model_name": "config-defined-router",
+                "model_info": {"id": "config-1", "db_model": False},
+                "litellm_params": {"model": "auto_router/complexity_router"},
+            },
+        ]
+        mock_router.delete_deployment = MagicMock(return_value=True)
+        mock_router.auto_routers = {
+            "config-defined-router": MagicMock(),
+            "deleted-db-auto-router": MagicMock(),
+        }
+        mock_router.complexity_routers = {
+            "deleted-db-complexity-router": MagicMock(),
+        }
+
+        mock_config = MagicMock()
+        mock_config.add_deployment = AsyncMock(return_value=True)
+
+        with (
+            patch("litellm.proxy.proxy_server.llm_router", mock_router),
+            patch("litellm.proxy.proxy_server.proxy_config", mock_config),
+            patch("litellm.proxy.proxy_server.prisma_client", MagicMock()),
+            patch("litellm.proxy.proxy_server.proxy_logging_obj", MagicMock()),
+            patch("litellm.proxy.proxy_server.verbose_proxy_logger"),
+        ):
+            await clear_cache()
+
+        assert "deleted-db-auto-router" not in mock_router.auto_routers
+        assert "deleted-db-complexity-router" not in mock_router.complexity_routers
+        assert "config-defined-router" in mock_router.auto_routers
 
 
 class TestUpdateModel:
