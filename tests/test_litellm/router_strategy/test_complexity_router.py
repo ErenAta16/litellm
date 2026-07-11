@@ -1514,3 +1514,101 @@ class TestKeywordOverrideEdgeCases:
         router = self._semantic_router(mock_router_instance, basic_config)
         router._semantic_routelayer = _StubRouteLayer(RouteChoice(name="NOT_A_TIER"))
         assert await router._semantic_tier_override("anything") is None
+
+
+class _RaisingRouteLayer:
+    """acall that always raises, simulating an embedding backend outage."""
+
+    def __init__(self, exc: Exception):
+        self._exc = exc
+
+    async def acall(self, text=None):
+        raise self._exc
+
+
+class TestSemanticFailureFallsBackToLexical:
+    """Regression: embedding failures during semantic keyword matching must
+    degrade to lexical rules (and, on further miss, to weighted scoring),
+    rather than propagating and hard-failing the request."""
+
+    @pytest.mark.asyncio
+    async def test_embedding_failure_falls_back_to_lexical_match(
+        self, mock_router_instance, basic_config
+    ):
+        config = {
+            **basic_config,
+            "keyword_tier_rules": [{"keywords": ["kubernetes"], "tier": "REASONING"}],
+            "semantic_keyword_matching": True,
+            "embedding_model": "fake-embed",
+            "match_threshold": 0.5,
+        }
+        router = ComplexityRouter(
+            model_name="test-router",
+            litellm_router_instance=mock_router_instance,
+            complexity_router_config=config,
+        )
+        router._semantic_routelayer = _RaisingRouteLayer(ValueError("embedding backend down"))
+
+        result = await router.async_pre_routing_hook(
+            model="test-model",
+            request_kwargs={},
+            messages=[{"role": "user", "content": "please help with kubernetes today"}],
+        )
+        assert result is not None
+        assert result.model == "o1-preview"
+
+    @pytest.mark.asyncio
+    async def test_embedding_failure_and_lexical_miss_falls_back_to_scoring(
+        self, mock_router_instance, basic_config
+    ):
+        config = {
+            **basic_config,
+            "keyword_tier_rules": [{"keywords": ["kubernetes"], "tier": "REASONING"}],
+            "semantic_keyword_matching": True,
+            "embedding_model": "fake-embed",
+            "match_threshold": 0.5,
+        }
+        router = ComplexityRouter(
+            model_name="test-router",
+            litellm_router_instance=mock_router_instance,
+            complexity_router_config=config,
+        )
+        router._semantic_routelayer = _RaisingRouteLayer(RuntimeError("network"))
+
+        result = await router.async_pre_routing_hook(
+            model="test-model",
+            request_kwargs={},
+            messages=[{"role": "user", "content": "hello there friend"}],
+        )
+        assert result is not None
+        assert result.model == "gpt-4o-mini"
+
+
+class TestKeywordOverrideSeesSystemPrompt:
+    """Regression: keyword_tier_rules must be able to match tokens that only
+    appear in the system prompt, matching how the weighted scorer already
+    scans system+user text for code, technical, and simple signals."""
+
+    @pytest.mark.asyncio
+    async def test_lexical_rule_fires_on_system_prompt_only_keyword(
+        self, mock_router_instance, basic_config
+    ):
+        config = {
+            **basic_config,
+            "keyword_tier_rules": [{"keywords": ["kubernetes"], "tier": "REASONING"}],
+        }
+        router = ComplexityRouter(
+            model_name="test-router",
+            litellm_router_instance=mock_router_instance,
+            complexity_router_config=config,
+        )
+        result = await router.async_pre_routing_hook(
+            model="test-model",
+            request_kwargs={},
+            messages=[
+                {"role": "system", "content": "You are a kubernetes cluster expert."},
+                {"role": "user", "content": "help me out"},
+            ],
+        )
+        assert result is not None
+        assert result.model == "o1-preview"

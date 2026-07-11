@@ -405,13 +405,26 @@ class ComplexityRouter(CustomLogger):
         except ValueError:
             return None
 
-    async def _resolve_keyword_tier_override(self, user_message: str) -> Optional[ComplexityTier]:
-        """Resolve a keyword_tier_rule override, semantically or lexically per config."""
+    async def _resolve_keyword_tier_override(self, keyword_text: str) -> Optional[ComplexityTier]:
+        """Resolve a keyword_tier_rule override, semantically or lexically per config.
+
+        Semantic mode degrades to lexical matching (and, if that also yields no
+        match, to the weighted scorer via the caller returning None) when the
+        embedding call fails, so a transient embedding outage does not turn
+        routing enhancements into hard request failures.
+        """
         if not self.config.keyword_tier_rules:
             return None
         if self.config.semantic_keyword_matching:
-            return await self._semantic_tier_override(user_message)
-        return self._lexical_tier_override(user_message)
+            try:
+                return await self._semantic_tier_override(keyword_text)
+            except Exception as exc:
+                verbose_router_logger.warning(
+                    f"ComplexityRouter: semantic keyword matching failed ({exc}), "
+                    "falling back to lexical keyword_tier_rules"
+                )
+                return self._lexical_tier_override(keyword_text)
+        return self._lexical_tier_override(keyword_text)
 
     def _resolve_messages(
         self,
@@ -533,7 +546,8 @@ class ComplexityRouter(CustomLogger):
                 messages=messages if has_original_messages else None,
             )
 
-        override_tier = await self._resolve_keyword_tier_override(user_message)
+        keyword_text = f"{system_prompt or ''} {user_message}".strip()
+        override_tier = await self._resolve_keyword_tier_override(keyword_text)
         if override_tier is not None:
             routed_model = self.get_model_for_tier(override_tier)
             verbose_router_logger.info(

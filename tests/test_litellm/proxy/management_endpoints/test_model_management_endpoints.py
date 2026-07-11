@@ -436,23 +436,26 @@ class TestClearCache:
             clear_cache,
         )
 
-        # Create mock router with mixed DB and config models
+        # Create mock router with mixed DB and config models. DB-backed router
+        # entries only exist for deployments whose litellm_params.model is an
+        # auto_router/* prefix, matching how init_auto_router_deployment and
+        # init_complexity_router_deployment gate creation.
         mock_router = MagicMock()
         mock_router.model_list = [
             {
                 "model_name": "gpt-4",
                 "model_info": {"id": "db-model-1", "db_model": True},
-                "litellm_params": {"model": "gpt-4"},
+                "litellm_params": {"model": "auto_router/foo"},
             },
             {
                 "model_name": "gpt-3.5-turbo",
                 "model_info": {"id": "config-model-1", "db_model": False},
-                "litellm_params": {"model": "gpt-3.5-turbo"},
+                "litellm_params": {"model": "auto_router/foo"},
             },
             {
                 "model_name": "claude-3",
                 "model_info": {"id": "db-model-2", "db_model": True},
-                "litellm_params": {"model": "claude-3"},
+                "litellm_params": {"model": "auto_router/complexity_router"},
             },
         ]
         mock_router.delete_deployment = MagicMock(return_value=True)
@@ -549,6 +552,45 @@ class TestClearCachePreservesConfigRouters:
         # Config-defined routers for unrelated tenants must survive untouched.
         assert "config-defined-complexity-router" in mock_router.complexity_routers
         assert "config-semantic-router" in mock_router.auto_routers
+
+    @pytest.mark.asyncio
+    async def test_config_router_survives_db_model_with_same_name(self):
+        """A DB-backed chat model that happens to share a model_name with a
+        config-defined router must not evict that router. Only DB rows that are
+        themselves auto/complexity router deployments (litellm_params.model
+        starts with ``auto_router/``) should clear the matching router entry.
+        """
+        from litellm.proxy.management_endpoints.model_management_endpoints import (
+            clear_cache,
+        )
+
+        shared_name = "shared-model-name"
+        mock_router = MagicMock()
+        mock_router.model_list = [
+            {
+                "model_name": shared_name,
+                "model_info": {"id": "db-plain-chat", "db_model": True},
+                "litellm_params": {"model": "openai/gpt-4o-mini"},
+            },
+        ]
+        mock_router.delete_deployment = MagicMock(return_value=True)
+        mock_router.auto_routers = {shared_name: MagicMock()}
+        mock_router.complexity_routers = {shared_name: MagicMock()}
+
+        mock_config = MagicMock()
+        mock_config.add_deployment = AsyncMock(return_value=True)
+
+        with (
+            patch("litellm.proxy.proxy_server.llm_router", mock_router),
+            patch("litellm.proxy.proxy_server.proxy_config", mock_config),
+            patch("litellm.proxy.proxy_server.prisma_client", MagicMock()),
+            patch("litellm.proxy.proxy_server.proxy_logging_obj", MagicMock()),
+            patch("litellm.proxy.proxy_server.verbose_proxy_logger"),
+        ):
+            await clear_cache()
+
+        assert shared_name in mock_router.auto_routers
+        assert shared_name in mock_router.complexity_routers
 
 
 class TestUpdateModel:

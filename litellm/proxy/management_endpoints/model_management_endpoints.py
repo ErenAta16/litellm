@@ -1719,11 +1719,16 @@ async def clear_cache():
         # .clear() would also drop config-defined routers, which are never re-added below
         # (add_deployment only reloads DB models) - leaving them permanently unroutable
         # until a full proxy restart, for every tenant, whenever any team admin updates
-        # any team-owned DB model.
-        db_model_names = {
-            model.get("model_name") for model in current_models if model.get("model_info", {}).get("db_model", False)
+        # any team-owned DB model. Only pop entries whose DB row is itself an
+        # auto/complexity router deployment; otherwise a DB model that happens to
+        # share a model_name with a config-defined router would evict it.
+        db_router_model_names = {
+            model.get("model_name")
+            for model in current_models
+            if model.get("model_info", {}).get("db_model", False)
+            and str(model.get("litellm_params", {}).get("model", "")).startswith("auto_router/")
         }
-        for model_name in db_model_names:
+        for model_name in db_router_model_names:
             llm_router.auto_routers.pop(model_name, None)
             llm_router.complexity_routers.pop(model_name, None)
 
