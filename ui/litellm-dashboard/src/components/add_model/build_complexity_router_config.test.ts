@@ -127,4 +127,22 @@ describe("getSemanticConfigError", () => {
       getSemanticConfigError({ semanticMatchingEnabled: true, embeddingModel: "voyage-3-5", keywordTierRules: [rule] }),
     ).toBeNull();
   });
+
+  it("errors when enabled with a rule that has no keywords, so semantic routing can't silently no-op", () => {
+    const emptyRule = { id: "r2", keywords: [], tier: "SIMPLE" as const };
+    expect(
+      getSemanticConfigError({
+        semanticMatchingEnabled: true,
+        embeddingModel: "voyage-3-5",
+        keywordTierRules: [emptyRule],
+      }),
+    ).toMatch(/keyword/i);
+    expect(
+      getSemanticConfigError({
+        semanticMatchingEnabled: true,
+        embeddingModel: "voyage-3-5",
+        keywordTierRules: [rule, emptyRule],
+      }),
+    ).toMatch(/keyword/i);
+  });
 });

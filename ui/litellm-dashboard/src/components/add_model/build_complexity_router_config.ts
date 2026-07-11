@@ -40,6 +40,8 @@ export const getSemanticConfigError = ({
   if (!semanticMatchingEnabled) return null;
   if (!embeddingModel) return "Select an embedding model to use semantic keyword matching";
   if (keywordTierRules.length === 0) return "Add at least one keyword tier rule to use semantic keyword matching";
+  if (keywordTierRules.some((rule) => rule.keywords.length === 0))
+    return "Add at least one keyword to every tier rule to use semantic keyword matching";
   return null;
 };
 
