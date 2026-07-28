@@ -385,5 +385,60 @@ class TestWordFormBudgetDurations(unittest.TestCase):
         self.assertIn("garbage", mock_warning.call_args.args)
 
 
+class TestDurationInSeconds(unittest.TestCase):
+    def test_supported_units(self):
+        self.assertEqual(duration_in_seconds("30s"), 30)
+        self.assertEqual(duration_in_seconds("30m"), 1800)
+        self.assertEqual(duration_in_seconds("2h"), 7200)
+        self.assertEqual(duration_in_seconds("7d"), 604800)
+        self.assertEqual(duration_in_seconds("2w"), 1209600)
+
+    def test_word_form_units_still_parse(self):
+        """The long unit spellings the old prefix match accepted must keep working.
+
+        `re.match(r"(\d+)(mo|[smhdw]?)", ...)` took the leading letter, so "1minutes" parsed as
+        minutes and "1months" as months. Those are spelled out explicitly now, so anchoring the
+        pattern does not turn a working config value into a startup error.
+        """
+        self.assertEqual(duration_in_seconds("90seconds"), 90)
+        self.assertEqual(duration_in_seconds("90secs"), 90)
+        self.assertEqual(duration_in_seconds("15minutes"), 900)
+        self.assertEqual(duration_in_seconds("15mins"), 900)
+        self.assertEqual(duration_in_seconds("6hours"), 21600)
+        self.assertEqual(duration_in_seconds("6hrs"), 21600)
+        self.assertEqual(duration_in_seconds("3days"), 259200)
+        self.assertEqual(duration_in_seconds("3day"), 259200)
+        self.assertEqual(duration_in_seconds("2weeks"), 1209600)
+        self.assertEqual(duration_in_seconds("2wks"), 1209600)
+        # months resolve against the calendar, so just assert they parse as months
+        for month_form in ("1mo", "1mon", "1month", "1months"):
+            self.assertGreater(duration_in_seconds(month_form), 27 * 86400)
+
+    def test_trailing_characters_are_rejected(self):
+        """A duration must be the whole string, not a prefix of it.
+
+        The unanchored match silently dropped everything after the first unit, so a compound
+        duration lost its tail and a typo became a valid-looking window:
+
+            "1h30m" -> 3600      (the 30m disappeared)
+            "1d12h" -> 86400     (the 12h disappeared)
+            "1ms"   -> 60        (read as 1 minute)
+            "10dogs" -> 864000   (read as 10 days)
+
+        These feed budget reset windows, key rotation intervals and log retention, so a wrong
+        value here is not visible until the window resets at the wrong time.
+        """
+        for bad in ("1h30m", "1d12h", "1ms", "1sx", "10dogs", "7dd", "1monthly"):
+            with self.subTest(duration=bad):
+                with self.assertRaises(ValueError):
+                    duration_in_seconds(bad)
+
+    def test_already_invalid_durations_still_raise(self):
+        for bad in ("30", "1D", "1 d", "1y", "1.5h", "-5d", ""):
+            with self.subTest(duration=bad):
+                with self.assertRaises(ValueError):
+                    duration_in_seconds(bad)
+
+
 if __name__ == "__main__":
     unittest.main()

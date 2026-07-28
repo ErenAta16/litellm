@@ -26,16 +26,32 @@ def _normalize_duration(duration: str) -> str:
     return _BUDGET_DURATION_WORD_ALIASES.get(duration.strip().lower(), duration)
 
 
+_DURATION_UNIT_ALIASES: Final[dict[str, str]] = {
+    "s": "s", "sec": "s", "secs": "s", "second": "s", "seconds": "s",
+    "m": "m", "min": "m", "mins": "m", "minute": "m", "minutes": "m",
+    "h": "h", "hr": "h", "hrs": "h", "hour": "h", "hours": "h",
+    "d": "d", "day": "d", "days": "d",
+    "w": "w", "wk": "w", "wks": "w", "week": "w", "weeks": "w",
+    "mo": "mo", "mon": "mo", "month": "mo", "months": "mo",
+}
+
+
 def _extract_from_regex(duration: str) -> Tuple[int, str]:
-    match = re.match(r"(\d+)(mo|[smhdw]?)", duration)
+    # `fullmatch`, not `match`: an unanchored match takes the leading unit and drops the rest, so
+    # "1h30m" parsed as 1 hour and "10dogs" as 10 days, with no error for the caller to notice.
+    match = re.fullmatch(r"(\d+)([a-z]+)", duration)
 
     if not match:
         raise ValueError("Invalid duration format")
 
     value, unit = match.groups()
-    value = int(value)
 
-    return value, unit
+    if unit not in _DURATION_UNIT_ALIASES:
+        raise ValueError(f"Unsupported duration unit, passed duration: {duration}")
+
+    # The word forms are the ones the old prefix match accepted by accident ("1minutes" took the
+    # leading "m", "1months" the leading "mo"), listed explicitly so they keep working.
+    return int(value), _DURATION_UNIT_ALIASES[unit]
 
 
 def get_last_day_of_month(year, month):
